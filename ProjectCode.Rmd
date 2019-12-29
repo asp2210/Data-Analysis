@@ -1,0 +1,680 @@
+---
+title: "Project"
+output:
+  html_document:
+    df_print: paged
+---
+# Setup
+```{r}
+
+library(openxlsx)
+library(janitor)
+library(tseries)
+library(matlib)
+library(fGarch)
+library(quadprog)
+library(boot)
+library(MASS)
+library(openxlsx)
+par(mar=c(1,1,1,1))
+
+#Import historical asset prices
+#data = read.xlsx('Data.xlsx',colNames = TRUE)
+data= read.xlsx("C:/Users/aishw/OneDrive/Desktop/OldDesktop/Desktop/Project-Stats/Data_M.xlsx",colNames=TRUE)
+data = ts(data[,-1],start=c(2004,11),end=c(2019,11),frequency=12)
+n = dim(data)[1]
+#Import risk-free rate
+rfr=read.xlsx('TB3MS.xlsx',colNames = TRUE)
+rfr=ts(rfr[,-1]*0.01,start=c(2004,11),end=c(2019,11),frequency=12)
+rfr_ave=mean(rfr[-1])
+mu_rfr = rfr_ave/12
+```
+
+# 2. Descriptive Statistics
+```{r}
+#Setup
+#Monthly Historical Returns
+returns = (data[2:n,] / data[1:(n-1),] - 1)
+colnames(returns) = c("BRKB_R","JPM_R","JNJ_R","PG_R","XOM_R","T_R","BAC_R","DIS_R","INTC_R","UNH_R","VZ_R","CVX_R","PFE_R","MRK_R","WFC_R","SP500_R")
+returns = ts(returns,start=c(2004,12),end=c(2019,11),frequency=12)
+mean_vect = colMeans(returns) #Monthly return mean
+cov_mat = cov(returns) #Monthly return covariance matrix
+sd_vect = sqrt(diag(cov_mat)) #Monthly return SD
+for (i in c("BRKB_R","JPM_R","JNJ_R","PG_R","XOM_R","T_R","BAC_R","DIS_R","INTC_R","UNH_R","VZ_R","CVX_R","PFE_R","MRK_R","WFC_R","SP500_R"))
+{
+  print(i)
+  print(skewness(returns[,i]))
+  print(kurtosis(returns[,i],method="excess"))
+}
+for (i in c("BRKB_R","JPM_R","JNJ_R","PG_R","XOM_R","T_R","BAC_R","DIS_R","INTC_R","UNH_R","VZ_R","CVX_R","PFE_R","MRK_R","WFC_R","SP500_R"))
+{
+  print(min(returns[,i]))
+}
+```
+
+## Monthly Price plots
+```{r}
+for (i in c("BRKB_AC","JPM_AC","JNJ_AC","PG_AC","XOM_AC","T_AC","BAC_AC","DIS_AC","INTC_AC","UNH_AC","VZ_AC","CVX_AC","PFE_AC","MRK_AC","WFC_AC"))
+{plot(data[,i],ylab=i)}
+```
+
+## Monthly Return plots
+```{r}
+for (i in c("BRKB_R","JPM_R","JNJ_R","PG_R","XOM_R","T_R","BAC_R","DIS_R","INTC_R","UNH_R","VZ_R","CVX_R","PFE_R","MRK_R","WFC_R"))
+{plot(returns[,i],type="l",ylab=i)}
+```
+
+## Equity Curve plots
+```{r}
+for (i in c("BRKB_AC","JPM_AC","JNJ_AC","PG_AC","XOM_AC","T_AC","BAC_AC","DIS_AC","INTC_AC","UNH_AC","VZ_AC","CVX_AC","PFE_AC","MRK_AC","WFC_AC"))
+{
+  EQ_stock=data[,i]/data[,i][1]
+  EQ_index=data[,"SP500_AC"]/data[,"SP500_AC"][1]
+  y_min=min(c(min(EQ_stock),min(EQ_index)))
+  y_max=max(c(max(EQ_stock),max(EQ_index)))
+  plot(EQ_stock,ylab="Equity Curve ($)",col="blue",ylim=c(y_min,y_max))
+ lines(data[,"SP500_AC"]/data[,"SP500_AC"][1],col="red")
+ legend(2005,y_max,legend=c(i,"S&P 500"),col=c("blue","red"),lty=c(1,1),lwd=c(2.5,2.5))
+ }
+```
+
+## Histograms for Returns
+```{r}
+for (i in c("BRKB_R","JPM_R","JNJ_R","PG_R","XOM_R","T_R","BAC_R","DIS_R","INTC_R","UNH_R","VZ_R","CVX_R","PFE_R","MRK_R","WFC_R"))
+{hist(returns[,i],xlab=i, main = paste("Histogram of",i))}
+```
+
+## Boxplots for Returns
+```{r}
+for (i in c("BRKB_R","JPM_R","JNJ_R","PG_R","XOM_R","T_R","BAC_R","DIS_R","INTC_R","UNH_R","VZ_R","CVX_R","PFE_R","MRK_R","WFC_R"))
+{boxplot(returns[,i],main=paste("Boxplot of",i))}
+```
+
+## QQ-plots for Returns
+```{r}
+for (i in c("BRKB_R","JPM_R","JNJ_R","PG_R","XOM_R","T_R","BAC_R","DIS_R","INTC_R","UNH_R","VZ_R","CVX_R","PFE_R","MRK_R","WFC_R"))
+{qqnorm(returns[,i],datax=T,main=paste("Boxplot of",i))
+  qqline(returns[,i],datax=T)}
+```
+
+## Test for Normality
+```{r}
+for (i in c("BRKB_R","JPM_R","JNJ_R","PG_R","XOM_R","T_R","BAC_R","DIS_R","INTC_R","UNH_R","VZ_R","CVX_R","PFE_R","MRK_R","WFC_R"))
+{
+  shapiro.test(returns[,i])
+}
+```
+
+## Tests for Stationarity
+```{r}
+for (i in c("BRKB_R","JPM_R","JNJ_R","PG_R","XOM_R","T_R","BAC_R","DIS_R","INTC_R","UNH_R","VZ_R","CVX_R","PFE_R","MRK_R","WFC_R"))
+{print(kpss.test(returns[,i], null="Trend"))
+  print(i)}
+```
+
+## Fitting different distributions
+```{r}
+for (i in c("BRKB_R","JPM_R","JNJ_R","PG_R","XOM_R","T_R","BAC_R","DIS_R","INTC_R","UNH_R","VZ_R","CVX_R","PFE_R","MRK_R","WFC_R","SP500_R"))
+{
+t.fit=stdFit(returns[,i])
+  print(paste(i, "t Fit"))
+  print(paste("AIC =",2*t.fit$objective+2*3))
+  print(paste("BIC =",2*t.fit$objective+3*log(180)))
+  print(t.fit$par)
+  
+st.fit=sstdFit(returns[,i])
+  print(paste(i, "skewed t Fit"))
+  print(paste("AIC =",2*st.fit$minimum+2*4))
+  print(paste("BIC =",2*st.fit$minimum+4*log(180)))
+  print(st.fit$estimate)
+
+ged.fit=gedFit(returns[,i])
+  print(paste(i, "GED Fit"))
+  print(paste("AIC =",2*ged.fit$objective+2*3))
+  print(paste("BIC =",2*ged.fit$objective+3*log(180)))
+  print(ged.fit$par)
+
+sged.fit=sgedFit(returns[,i])
+  print(paste(i, "skewed GED Fit"))
+  print(paste("AIC =",2*sged.fit$objective+2*4))
+  print(paste("BIC =",2*sged.fit$objective+4*log(180)))
+  print(sged.fit$par)
+}
+```
+
+## Annualize
+```{r}
+ann_returns_mean=mean_vect*12 #annualized mean return
+print(ann_returns_mean)
+ann_returns_sd=sd_vect*sqrt(12) #annualized return SD
+print(ann_returns_sd)
+```
+
+## Sharpe's slope for individual assets
+```{r}
+sharpe_ratio=(mean_vect-rfr_ave/12)/sd_vect
+print(sharpe_ratio)
+```
+
+## Pairwise Scatterplot
+```{r}
+plot(as.data.frame(returns[,-16]))
+```
+
+## Beta
+```{r}
+ExReturns=returns-rfr[-1]/12 #excess return
+for (i in c("BRKB_R","JPM_R","JNJ_R","PG_R","XOM_R","T_R","BAC_R","DIS_R","INTC_R","UNH_R","VZ_R","CVX_R","PFE_R","MRK_R","WFC_R"))
+{
+print(i)
+print(summary(lm(ExReturns[,i]~ExReturns[,16]))$coef)
+}
+```
+
+# 3. Portfolio Theory
+## Short sale allowed
+### MVP
+```{r}
+mu = matrix(mean_vect[1:15],
+            nrow=15,ncol=1) #mu
+names(mu) = c("BRKB_R","JPM_R","JNJ_R","PG_R","XOM_R","T_R","BAC_R","DIS_R","INTC_R","UNH_R","VZ_R","CVX_R","PFE_R","MRK_R","WFC_R")
+Omega = matrix(cov_mat[1:15,1:15],
+               nrow=15,ncol=15) #covariance matrix
+One = matrix(c(1,1,1,1,1,1,1,1,1,1,1,1,1,1,1),
+             nrow=15,ncol=1)
+#find weight across assets for MVP
+w_mvp = (inv(Omega) %*% One)/as.numeric(t(One) %*% inv(Omega) %*% One)
+#find mu_mvp
+mu_mvp = t(w_mvp) %*% mu #mean return of MVP portfolio
+#find sigma^2_mvp
+var_mvp = t(w_mvp) %*% Omega %*% w_mvp 
+#find sigma_mvp
+sd_mvp=sqrt(var_mvp) #standard deviation of MVP portfolio
+#annualized mean and sd
+mu_mvp_ann = mu_mvp*12
+sd_mvp_ann = sd_mvp*sqrt(12)
+```
+
+```{r}
+# 5% VaR with $100,000 investment
+return_mat=matrix(returns[,-16],nrow=180,ncol=15)
+return_mvp=t(t(w_mvp) %*% t(return_mat))
+VaR_mvp1 = quantile(return_mvp,0.05)*100000*(-1)
+#ES
+ES_mvp1 = -100000*sum(return_mvp[-return_mvp> -quantile(return_mvp,0.05)])/sum(as.numeric(-return_mvp>-quantile(return_mvp,0.05)))
+
+#Bootstrap for SD and CI of VaR and ES
+VaRES = function(x,i)
+{
+  q<-quantile(x[i],0.05)
+  c(-q*100000,-mean(x[x<q])*100000)
+}
+
+res = boot(return_mvp,statistic=VaRES,R=10000,stype = "i")
+
+print(paste("VaR",quantile(return_mvp,0.05)*(-100000)))
+print(paste("ES",mean(return_mvp[return_mvp<quantile(return_mvp,0.05)])*(-100000)))
+print(res)
+
+print("CI of VaR")
+print(boot.ci(res,conf=0.95,,type="perc",index=1))
+print("CI of ES")
+print(boot.ci(res,conf=0.95,,type="perc",index=2))
+
+#5%VaR with $100000 investment (assume normal distribution)
+VaR_mvp2 = -100000*(mu_mvp+sd_mvp*qnorm(0.05))
+ES_mvp2 = 100000*(-mu_mvp+sd_mvp*(dnorm(qnorm(0.05))/0.05))
+
+#Bootstrap for SD and CI of VaR and ES
+VaRES2 = function(x,i)
+{
+  fit.norm = fitdistr(x[i],"normal")
+  mu.norm = fit.norm$estimate[["mean"]]
+  sd.norm=fit.norm$estimate[["sd"]]
+  VaR.norm = -100000*(mu.norm+sd.norm*qnorm(0.05))
+  ES.norm = 100000*(-mu.norm+sd.norm*(dnorm(qnorm(0.05))/0.05))
+  return(c(VaR.norm,ES.norm))
+}
+
+res2=boot(return_mvp,statistic = VaRES2, R=10000,stype = "i")
+print(res2)
+
+print("CI VaR")
+print(boot.ci(res2,conf=0.95,,type="norm",index=1))
+print("CI ES")
+print(boot.ci(res2,conf=0.95,,type="norm",index=2))
+```
+
+### 6% return per year using only risky assets
+```{r}
+mu_0.005=0.005 #target monthly return
+w1 = inv(Omega) %*% One/as.numeric(t(One) %*% inv(Omega) %*% One)
+w2 = inv(Omega) %*% mu/as.numeric(t(One) %*% inv(Omega) %*% mu)
+delta_w=w1-w2
+e1 = (as.numeric(t(w1)%*%mu)*w2-as.numeric(t(w2) %*% mu)*w1)/as.numeric(t(mu) %*% delta_w)
+e2 = (w1-w2)/as.numeric(t(mu) %*% delta_w)
+w_efficient=e1+mu_0.005*e2
+print(w_efficient) #weight of 6% return per year using only risky assets
+
+var_efficient = t(w_efficient) %*% Omega %*% w_efficient
+sd_efficient = sqrt(var_efficient) #monthly risk
+print(sd_efficient)
+print(sqrt(12)*sd_efficient) #annualized risk
+
+mu_efficient = t(w_efficient) %*% mu
+print(as.numeric(mu_efficient)) #monthly return
+print(12*mu_efficient) #annualized return
+
+#5%VaR with $100000 investment
+return_efficient=t(t(w_efficient) %*% t(return_mat))
+VaR_efficient1 = quantile(return_efficient,0.05)*100000*(-1)
+print(VaR_efficient1)
+#ES
+ES_efficient1 = -100000*sum(return_efficient[-return_efficient> -quantile(return_efficient,0.05)])/sum(as.numeric(-return_efficient>-quantile(return_efficient,0.05)))
+print(ES_efficient1)
+
+#bootstrap
+res = boot(return_efficient,statistic=VaRES,R=10000,stype = "i")
+print(paste("VaR",quantile(return_efficient,0.05)*(-100000)))
+print(paste("ES",mean(return_efficient[return_efficient<quantile(return_efficient,0.05)])*(-100000)))
+print(res)
+
+print("CI VaR")
+print(boot.ci(res,conf=0.95,,type="perc",index=1))
+print("CI ES")
+print(boot.ci(res,conf=0.95,,type="perc",index=2))
+
+#5%VaR with $100000 investment (assume normal distribution)
+VaR_efficient2 = -100000*(mu_efficient+sd_efficient*qnorm(0.05))
+ES_efficient2 = 100000*(-mu_efficient+sd_efficient*(dnorm(qnorm(0.05))/0.05))
+
+res2=boot(return_efficient,statistic = VaRES2, R=10000,stype = "i")
+print(res2)
+
+print("CI VaR")
+print(boot.ci(res2,conf=0.95,,type="norm",index=1))
+print("CI ES")
+print(boot.ci(res2,conf=0.95,,type="norm",index=2))
+```
+
+### Tangency portfolio
+```{r}
+w_tangency=(inv(Omega) %*% (mu-mu_rfr*One))/as.numeric(t(One) %*% inv(Omega) %*% (mu-mu_rfr*One))
+print(w_tangency) #weight in tangency portfolio
+mu_tangency = t(w_tangency) %*% mu #monthly return
+var_tangency = t(w_tangency) %*% Omega %*% w_tangency
+sd_tangency = sqrt(var_tangency) #monthly risk
+sharpe_tangency=(mu_tangency-mu_rfr)/sd_tangency #sharpe ratio of tangency portfolio
+
+#5%VaR with $100000 investment
+return_tangency=t(t(w_tangency) %*% t(return_mat))
+VaR_tangency1 = quantile(return_tangency,0.05)*100000*(-1)
+print(VaR_tangency1)
+#ES
+ES_tangency1 = -100000*sum(return_tangency[-return_tangency> -quantile(return_tangency,0.05)])/sum(as.numeric(-return_tangency>-quantile(return_tangency,0.05)))
+print(ES_tangency1)
+
+#bootstrap
+res = boot(return_tangency,statistic=VaRES,R=10000,stype = "i")
+print(paste("VaR",quantile(return_tangency,0.05)*(-100000)))
+print(paste("ES",mean(return_tangency[return_tangency<quantile(return_tangency,0.05)])*(-100000)))
+print(res)
+
+print("CI VaR")
+print(boot.ci(res,conf=0.95,,type="perc",index=1))
+print("CI ES")
+print(boot.ci(res,conf=0.95,,type="perc",index=2))
+
+#5%VaR with $100000 investment (assume normal distribution)
+VaR_tangency2 = -100000*(mu_tangency+sd_tangency*qnorm(0.05))
+ES_tangency2 = 100000*(-mu_tangency+sd_tangency*(dnorm(qnorm(0.05))/0.05))
+
+res2=boot(return_tangency,statistic = VaRES2, R=10000,stype = "i")
+print(res2)
+
+print("CI VaR")
+print(boot.ci(res2,conf=0.95,,type="norm",index=1))
+print("CI ES")
+print(boot.ci(res2,conf=0.95,,type="norm",index=2))
+```
+
+### 6% return with T-bills and Tangency portfolio
+```{r}
+theta=(0.005-as.numeric(mu_tangency))/(mu_rfr-as.numeric(mu_tangency))
+print(theta) #weight to T-bills
+mu_mixed = theta*mu_rfr+(1-theta)*as.numeric(mu_tangency)
+print(mu_mixed)
+print(mu_mixed*12)
+var_tangency = t(w_tangency) %*% Omega %*% w_tangency
+var_mixed = (1-theta)^2*as.numeric(var_tangency)
+sd_mixed = sqrt(var_mixed)
+print(sd_mixed)
+print(sd_mixed*sqrt(12))
+
+# 5%VaR with $100000 investment (nonparametric)
+return_mixed=t(t((1-theta)*w_tangency) %*% t(return_mat)+theta*mu_rfr)
+VaR_mixed1 = quantile(return_mixed,0.05)*100000*(-1)
+print(VaR_mixed1)
+#ES
+ES_mixed1 = -100000*sum(return_mixed[-return_mixed> -quantile(return_mixed,0.05)])/sum(as.numeric(-return_mixed>-quantile(return_mixed,0.05)))
+print(ES_mixed1)
+
+#bootstrap
+res = boot(return_mixed,statistic=VaRES,R=10000,stype = "i")
+print(paste("VaR",quantile(return_mixed,0.05)*(-100000)))
+print(paste("ES",mean(return_mixed[return_mixed<quantile(return_mixed,0.05)])*(-100000)))
+print(res)
+
+print("CI VaR")
+print(boot.ci(res,conf=0.95,,type="perc",index=1))
+print("CI ES")
+print(boot.ci(res,conf=0.95,,type="perc",index=2))
+
+#5%VaR with $100000 investment (assume normal distribution)
+VaR_mixed2 = -100000*(mu_mixed+sd_mixed*qnorm(0.05))
+ES_mixed2 = 100000*(-mu_mixed+sd_mixed*(dnorm(qnorm(0.05))/0.05))
+
+#bootstrap
+res2=boot(return_mixed,statistic = VaRES2, R=10000,stype = "i")
+print(res2)
+
+print("CI VaR")
+print(boot.ci(res2,conf=0.95,,type="norm",index=1))
+print("CI ES")
+print(boot.ci(res2,conf=0.95,,type="norm",index=2))
+```
+
+### Efficient Frontier
+```{r}
+M=length(mean_vect[1:15])
+Amat = cbind(rep(1,M),mean_vect[1:15])
+muP = seq(0.003, 0.016, length = 300)
+sdP = muP # set up storage for std dev’s of portfolio returns
+weights = matrix(0, nrow = 300, ncol = M) # storage for weights
+for (i in 1:length(muP))
+{
+  bvec = c(1, muP[i])
+  result = solve.QP(Dmat = 2 * cov_mat[1:15,1:15], dvec = rep(0, M),
+                    Amat = Amat, bvec = bvec, meq = 2)
+  sdP[i] = sqrt(result$value)
+  weights[i,] = result$solution
+}
+plot(sdP,muP,type="l",xlim=c(0,0.05),ylim=c(0.001,.016))
+points(0,mu_rfr,pch=15)
+sharpe =(muP-mu_rfr)/sdP
+ind = (sharpe == max(sharpe))
+lines(c(0,sdP[ind]),c(mu_rfr,muP[ind]),col="red",lwd=3)
+points(sdP[ind],muP[ind],pch=15)
+ind2 = (sdP == min(sdP))
+points(sdP[ind2],muP[ind2],pch=17)
+ind3 = (muP > muP[ind2])
+lines(sdP[ind3],muP[ind3],type="l",xlim=c(0,.05),ylim=c(0,.02),col="cyan",lwd=3)
+legend("topleft",c("efficient frontier","efficient portfolios"),
+lty=c(1,1),
+lwd=c(3,3),
+pch=c("",""),
+col=c("cyan","red"),
+)
+```
+
+## Short sale not allowed
+### Efficient Frontier
+```{r}
+M=length(mean_vect[1:15])
+Amat = cbind(rep(1,M),mean_vect[1:15],diag(1,nrow=M))
+muP = seq(min(mean_vect[1:15]),max(mean_vect[1:15]), length = 300)
+sdP = muP # set up storage for std dev’s of portfolio returns
+weights = matrix(0, nrow = 300, ncol = M) # storage for weights
+for (i in 1:length(muP))
+{
+  bvec = c(1, muP[i],rep(0,M))
+  result = solve.QP(Dmat = 2 * cov_mat[1:15,1:15], dvec = rep(0, M),
+                    Amat = Amat, bvec = bvec, meq = 2)
+  sdP[i] = sqrt(result$value)
+  weights[i,] = result$solution
+}
+plot(sdP,muP,type="l",xlim=c(0,0.08),ylim=c(0.001,.016))
+points(0,mu_rfr,pch=15)
+sharpe =(muP-mu_rfr)/sdP
+ind = (sharpe == max(sharpe))
+lines(c(0,sdP[ind]),c(mu_rfr,muP[ind]),col="red",lwd=3)
+points(sdP[ind],muP[ind],pch=15)
+ind2 = (sdP == min(sdP))
+points(sdP[ind2],muP[ind2],pch=17)
+ind3 = (muP > muP[ind2])
+lines(sdP[ind3],muP[ind3],type="l",xlim=c(0,.08),ylim=c(0,.02),col="cyan",lwd=3)
+legend("topleft",c("efficient frontier","efficient portfolios"),
+lty=c(1,1),
+lwd=c(3,3),
+pch=c("",""),
+col=c("cyan","red"),
+)
+```
+
+###MVP
+```{r}
+ind2 = (sdP == min(sdP))
+n_w_mvp=weights[ind2,]
+#find mu_mvp
+n_mu_mvp = t(n_w_mvp) %*% mu #mean return
+#find sigma^2_mvp
+n_var_mvp = t(n_w_mvp) %*% Omega %*% n_w_mvp
+#find sigma_mvp
+n_sd_mvp=sqrt(n_var_mvp) #standard deviation
+#annualized mean and sd
+n_mu_mvp_ann = n_mu_mvp*12
+n_sd_mvp_ann = n_sd_mvp*sqrt(12)
+print(n_mu_mvp)
+
+# 5% VaR with $100,000 investment
+n_return_mvp=t(t(n_w_mvp) %*% t(return_mat))
+n_VaR_mvp1 = quantile(n_return_mvp,0.05)*100000*(-1)
+print(n_VaR_mvp1)
+#ES
+n_ES_mvp1 = -100000*sum(n_return_mvp[-n_return_mvp> -quantile(n_return_mvp,0.05)])/sum(as.numeric(-n_return_mvp>-quantile(n_return_mvp,0.05)))
+print(n_ES_mvp1)
+
+res = boot(n_return_mvp,statistic=VaRES,R=10000,stype = "i")
+
+print(paste("VaR",quantile(n_return_mvp,0.05)*(-100000)))
+print(paste("ES",mean(n_return_mvp[n_return_mvp<quantile(n_return_mvp,0.05)])*(-100000)))
+print(res)
+
+print("CI VaR")
+print(boot.ci(res,conf=0.95,,type="perc",index=1))
+print("CI ES")
+print(boot.ci(res,conf=0.95,,type="perc",index=2))
+#5%VaR with $100000 investment (assume normal distribution)
+n_VaR_mvp2 = -100000*(n_mu_mvp+n_sd_mvp*qnorm(0.05))
+n_ES_mvp2 = 100000*(-n_mu_mvp+n_sd_mvp*(dnorm(qnorm(0.05))/0.05))
+
+res2=boot(n_return_mvp,statistic = VaRES2, R=10000,stype = "i")
+
+print(res2)
+
+print("CI VaR")
+print(boot.ci(res2,conf=0.95,,type="norm",index=1))
+print("CI ES")
+print(boot.ci(res2,conf=0.95,,type="norm",index=2))
+```
+
+### 6% Risky Asset
+Cannot be reached here because min(mean_vect)>0.005
+
+### Tangency portfolio
+```{r}
+n_w_tangency = weights[ind,] #weights of Tangency Portfolio
+n_mu_tangency = t(n_w_tangency) %*% mu
+n_var_tangency = t(n_w_tangency) %*% Omega %*% n_w_tangency
+n_sd_tangency = sqrt(n_var_tangency) #monthly risk
+n_sharpe_tangency=(n_mu_tangency-mu_rfr)/n_sd_tangency #sharpe ratio of tangency portfolio
+print(n_mu_tangency*12) #annualized return
+print(n_sd_tangency*sqrt(12)) #annualized risk
+
+#5%VaR with $100000 investment (nonparametric)
+n_return_tangency=t(t(n_w_tangency) %*% t(return_mat))
+n_VaR_tangency1 = quantile(n_return_tangency,0.05)*100000*(-1)
+print(n_VaR_tangency1)
+#ES
+n_ES_tangency1 = -100000*sum(n_return_tangency[-n_return_tangency> -quantile(n_return_tangency,0.05)])/sum(as.numeric(-n_return_tangency>-quantile(n_return_tangency,0.05)))
+print(n_ES_tangency1)
+
+#bootstrap
+res = boot(n_return_tangency,statistic=VaRES,R=10000,stype = "i")
+print(paste("VaR",quantile(n_return_tangency,0.05)*(-100000)))
+print(paste("ES",mean(n_return_tangency[n_return_tangency<quantile(n_return_tangency,0.05)])*(-100000)))
+print(res)
+
+print("CI VaR")
+print(boot.ci(res,conf=0.95,,type="perc",index=1))
+print("CI ES")
+print(boot.ci(res,conf=0.95,,type="perc",index=2))
+
+#5%VaR with $100000 investment (assume normal distribution)
+n_VaR_tangency2 = -100000*(n_mu_tangency+n_sd_tangency*qnorm(0.05))
+n_ES_tangency2 = 100000*(-n_mu_tangency+n_sd_tangency*(dnorm(qnorm(0.05))/0.05))
+
+res2=boot(n_return_tangency,statistic = VaRES2, R=10000,stype = "i")
+print(res2)
+
+print("CI VaR")
+print(boot.ci(res2,conf=0.95,,type="norm",index=1))
+print("CI ES")
+print(boot.ci(res2,conf=0.95,,type="norm",index=2))
+```
+### 6% Tangency + Risk-Free
+```{r}
+n_theta=(0.005-as.numeric(n_mu_tangency))/(mu_rfr-as.numeric(n_mu_tangency))
+n_mu_mixed = n_theta*mu_rfr+(1-n_theta)*as.numeric(n_mu_tangency)
+print(n_mu_mixed)
+print(n_mu_mixed*12)
+n_var_tangency = t(n_w_tangency) %*% Omega %*% n_w_tangency
+n_var_mixed = (1-n_theta)^2*as.numeric(n_var_tangency)
+n_sd_mixed = sqrt(n_var_mixed)
+print(n_sd_mixed)
+print(n_sd_mixed*sqrt(12))
+#5%VaR with $100000 investment (nonparametric)
+n_return_mixed=t(t((1-n_theta)*n_w_tangency) %*% t(return_mat)+n_theta*mu_rfr)
+n_VaR_mixed1 = quantile(n_return_mixed,0.05)*100000*(-1)
+print(n_VaR_mixed1)
+#ES
+n_ES_mixed1 = -100000*sum(n_return_mixed[-n_return_mixed> -quantile(n_return_mixed,0.05)])/sum(as.numeric(-n_return_mixed>-quantile(n_return_mixed,0.05)))
+print(n_ES_mixed1)
+
+res = boot(n_return_mixed,statistic=VaRES,R=10000,stype = "i")
+
+print(paste("VaR",quantile(n_return_mixed,0.05)*(-100000)))
+print(paste("ES",mean(n_return_mixed[n_return_mixed<quantile(n_return_mixed,0.05)])*(-100000)))
+print(res)
+
+print("CI VaR")
+print(boot.ci(res,conf=0.95,,type="perc",index=1))
+print("CI ES")
+print(boot.ci(res,conf=0.95,,type="perc",index=2))
+#5%VaR with $100000 investment (assume normal distribution)
+n_VaR_mixed2 = -100000*(n_mu_mixed+n_sd_mixed*qnorm(0.05))
+n_ES_mixed2 = 100000*(-n_mu_mixed+n_sd_mixed*(dnorm(qnorm(0.05))/0.05))
+
+res2=boot(n_return_mixed,statistic = VaRES2, R=10000,stype = "i")
+
+print(res2)
+
+print("CI VaR")
+print(boot.ci(res2,conf=0.95,,type="norm",index=1))
+print("CI ES")
+print(boot.ci(res2,conf=0.95,,type="norm",index=2))
+```
+
+# 5 Principal Component Analysis
+```{r}
+D=matrix(rep(0,15*15),nrow=15,ncol=15)
+for (i in seq(1,15,1))
+{D[i,i]=sd_vect[i]}
+corr_return = inv(D) %*% cov_mat[1:15,1:15] %*% inv(D)
+print(corr_return)
+return.pca = prcomp(returns[,1:15])
+summary(return.pca)
+fact=factanal(returns[,1:15],factors=7,rotation="none",cutoff=0.05)
+print(fact)
+loadings = matrix(as.numeric(loadings(fact)), ncol = 7)
+unique = as.numeric(fact$unique)
+betas = t(loadings) 
+
+Sigma_R_hat = t(betas) %*% betas + diag( unique, ncol=15)
+#rotation
+fact_rotation=factanal(returns[,1:15],factors=7)
+print(fact_rotation)#
+print(eigen(Sigma_R_hat-corr_return)$values)# eigenvalues of the difference of the estimate and sample correlation matrix 
+```
+
+# 6 Risk Managment
+## VaR(0.05) Monthly & ES for assets
+### nonparametric
+```{r}
+for (r in c("BRKB_R","JPM_R","JNJ_R","PG_R","XOM_R","T_R","BAC_R","DIS_R","INTC_R","UNH_R","VZ_R","CVX_R","PFE_R","MRK_R","WFC_R","SP500_R"))
+{
+res = boot(returns[,r],statistic=VaRES,R=10000,stype = "i")
+
+print(paste(r,"VaR",quantile(returns[,r],0.05)*(-100000)))
+print(paste(r,"ES",mean(returns[,r][returns[,r]<quantile(returns[,r],0.05)])*(-100000)))
+print(res)
+
+print("CI VaR")
+print(boot.ci(res,conf=0.95,,type="perc",index=1))
+print("CI ES")
+print(boot.ci(res,conf=0.95,,type="perc",index=2))
+}
+
+```
+### parametric
+```{r}
+for (i in c("BRKB_R","JPM_R","JNJ_R","PG_R","XOM_R","T_R","BAC_R","DIS_R","INTC_R","UNH_R","VZ_R","CVX_R","PFE_R","MRK_R","WFC_R","SP500_R"))
+{
+print(paste(i, "5% VaR (assume normal distribution)"))
+print(-100000*(mean_vect[i]+sd_vect[i]*qnorm(0.05)))
+print(paste(i, "ES (assume normal distribution)"))
+print(100000*(-mean_vect[i]+sd_vect[i]*(dnorm(qnorm(0.05))/0.05)))
+}
+
+#Bootstrap
+for (r in c("BRKB_R","JPM_R","JNJ_R","PG_R","XOM_R","T_R","BAC_R","DIS_R","INTC_R","UNH_R","VZ_R","CVX_R","PFE_R","MRK_R","WFC_R","SP500_R"))
+{
+res2=boot(returns[,r],statistic = VaRES2, R=10000,stype = "i")
+
+print(res2)
+print("CI VaR")
+print(boot.ci(res2,conf=0.95,,type="norm",index=1))
+print("CI ES")
+print(boot.ci(res2,conf=0.95,,type="norm",index=2))
+}
+```
+# 7 Copula
+```{r}
+library(copula)
+library(sn)
+
+Ct=fitCopula(copula=tCopula(dim=15),data=pobs(returns[,-16]),method="ml")
+Ct@estimate
+print(loglikCopula(param=Ct@estimate, u=pobs(returns[,-16]), copula=tCopula(dim = 15)))
+LastValue=loglikCopula(param=Ct@estimate, u=pobs(returns[,-16]), copula=tCopula(dim = 15))
+print(-2*LastValue + 2*length(Ct@estimate))
+
+Cgauss = fitCopula(copula=normalCopula(dim = 15), data=pobs(returns[,-16]),method="ml")
+print(Cgauss@estimate)
+
+print(loglikCopula(param=Cgauss@estimate, u=pobs(returns[,-16]),copula=normalCopula(dim = 15)))
+LastValue=loglikCopula(param=Cgauss@estimate, u=pobs(returns[,-16]),copula=normalCopula(dim = 15))
+print(-2*LastValue + 2*length(Cgauss@estimate))
+
+Cfr = fitCopula(copula=frankCopula(1, dim=15), data=pobs(returns[,-16]),method="ml")
+print(Cfr@estimate)
+print(loglikCopula(param=Cfr@estimate, u=pobs(returns[,-16]),copula=frankCopula(dim = 15)))
+LastValue=loglikCopula(param=Cfr@estimate, u=pobs(returns[,-16]),copula=frankCopula(dim = 15))
+print(-2*LastValue + 2*length(Cfr@estimate))
+
+Ccl = fitCopula(copula=claytonCopula(1, dim=15), data=pobs(returns[,-16]),method="ml")
+Ccl@estimate
+print(loglikCopula(param=Ccl@estimate, u=pobs(returns[,-16]),copula=claytonCopula(dim = 15)))
+LastValue=loglikCopula(param=Ccl@estimate, u=pobs(returns[,-16]),copula=claytonCopula(dim = 15))
+print(-2*LastValue+ 2*length(Ccl@estimate))
+```
